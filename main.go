@@ -2,29 +2,44 @@ package main
 
 import (
 	"strconv"
-	// "github.com/ethereum/go-ethereum/core/types"
+
+	"github.com/ethereum/go-ethereum/core/types"
+
 	// "math/big"
-	"log"
-	_ "github.com/joho/godotenv/autoload"
-	"os"
-    "fmt"
-    "github.com/ethereum/go-ethereum/ethclient"
 	"context"
+	"fmt"
+	"log"
+	"math/big"
+	"os"
+
+	"github.com/ethereum/go-ethereum/ethclient"
+	_ "github.com/joho/godotenv/autoload"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"math/big"
 )
 
 type Block struct {
 	// gorm.Model
-	ID           uint
-	BlockNum     uint64
-	BlockHash    string
-	BlockTime    uint64
-	ParentHash   string
+	ID         uint64
+	BlockNum   uint64
+	BlockHash  string
+	BlockTime  uint64
+	ParentHash string
 }
 
-var(
+type Transaction struct {
+	gorm.Model
+	ID      uint64
+	TxHash  string
+	From    string
+	To      string
+	Nonce   uint64
+	Data    []byte
+	Value   string
+	BlockID uint64
+}
+
+var (
 	db *gorm.DB
 )
 
@@ -33,47 +48,77 @@ func (block Block) TableName() string {
 	return "block"
 }
 
+func (transaction Transaction) TableName() string {
+	// 绑定MYSQL表名為transaction
+	return "transaction"
+}
+
 func main() {
 	initDb()
-	client, err := ethclient.Dial("https://mainnet.infura.io/v3/" + os.Getenv("INFURA_ETH_MAIN_KEY") )
-    if err != nil {
-        fmt.Println("json-rpc server connection failed")
+	client, err := ethclient.Dial("https://mainnet.infura.io/v3/" + os.Getenv("INFURA_ETH_MAIN_KEY"))
+	if err != nil {
+		fmt.Println("json-rpc server connection failed")
 		return
-    }
+	}
 
 	// Get latest block header
 	latestHeader, err := client.HeaderByNumber(context.Background(), nil)
-    if err != nil {
-        log.Fatal(err)
-    }
-    // fmt.Println("Latest block header:" + latestHeader.Number.String())
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Get block by header number
-    // blockNumber := big.NewInt(17102552)
-    block, err := client.BlockByNumber(context.Background(), latestHeader.Number)
-    if err != nil {
-        log.Fatal(err)
-    }
-	fmt.Println("block_num:", block.Number().Uint64())     // 17102552
-	fmt.Println("block_hash:", block.Hash().Hex())          // 0x9e8751ebb5069389b855bba72d94902cc385042661498a415979b7b6ee9ba4b9
-    fmt.Println("block_time:", block.Time())       // 1527211625
-	fmt.Println("parent_num:", block.Number().Uint64() - 1 )
+	block, err := client.BlockByNumber(context.Background(), latestHeader.Number)
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	// Get parent_hash by parent_num
 	parentNumber := big.NewInt((block.Number().Int64() - 1))
-
 	parentBlock, err := client.BlockByNumber(context.Background(), parentNumber)
-    if err != nil {
-        log.Fatal(err)
-    }
+	if err != nil {
+		log.Fatal(err)
+	}
 	parentHash := parentBlock.Hash().Hex()
 
+	fmt.Println("block_num:", block.Number().Uint64()) // 17102552
+	fmt.Println("block_hash:", block.Hash().Hex())     // 0x9e8751ebb5069389b855bba72d94902cc385042661498a415979b7b6ee9ba4b9
+	fmt.Println("block_time:", block.Time())           // 1527211625
+	fmt.Println("parent_hash:", parentHash)            // 17102551
+
+	// Insert block
 	blockModel := Block{
-		BlockNum: block.Number().Uint64(),
-		BlockHash: block.Hash().Hex(),
-		BlockTime: block.Time(),
+		BlockNum:   block.Number().Uint64(),
+		BlockHash:  block.Hash().Hex(),
+		BlockTime:  block.Time(),
 		ParentHash: parentHash,
 	}
 	db.Create(&blockModel)
+	blockId := blockModel.ID
+
+	// Iterate txs
+	for _, tx := range block.Transactions() {
+		from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+
+		fmt.Println("tx_hash:", tx.Hash().Hex())   // 0x7104e3d31ed4f82278b7b03a40661f289d95ad10385543c4cdf8755a678af8a2
+		fmt.Println("from:", from.Hex())           // 0xB55Ff2eafcE9Efb883d0E6Ad27a286AA875dBED2
+		fmt.Println("to:", tx.To().Hex())          // 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
+		fmt.Println("nonce:", tx.Nonce())          // 79
+		fmt.Println("data:", tx.Data())            // [24 203 175 229 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+		fmt.Println("value:", tx.Value().String()) // 10000000000000000
+
+		// Insert tx
+		transactionModel := Transaction{
+			TxHash:  tx.Hash().Hex(),
+			From:    from.Hex(),
+			To:      tx.To().Hex(),
+			Nonce:   tx.Nonce(),
+			Data:    tx.Data(),
+			Value:   tx.Value().String(),
+			BlockID: blockId,
+		}
+		db.Create(&transactionModel)
+	}
 }
 
 func initDb() {
