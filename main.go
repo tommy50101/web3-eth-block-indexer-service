@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strconv"
-
 	"github.com/ethereum/go-ethereum/core/types"
 
 	// "math/big"
@@ -118,16 +116,12 @@ func main() {
 			BlockID: blockId,
 		}
 		db.Create(&transactionModel)
+		break
 	}
 }
 
 func initDb() {
-	username := os.Getenv("DB_USERNAME")
-	password := os.Getenv("DB_PWD")
-	host := os.Getenv("DB_HOST")
-	port, _ := strconv.Atoi(os.Getenv("DB_PORT"))
-	Dbname := os.Getenv("DB_NAME")
 	// 連線Db
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True&loc=Local", username, password, host, port, Dbname)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True&loc=Local", DB_USERNAME, DB_PWD, DB_HOST, DB_PORT, DB_NAME)
 	db, _ = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 }
