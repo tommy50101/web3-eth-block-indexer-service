@@ -38,6 +38,12 @@ type Transaction struct {
 	Value   string
 	BlockID uint64
 }
+type Log struct {
+	gorm.Model
+	Index         uint
+	Data          []byte
+	TransactionID uint64
+}
 
 var (
 	db *gorm.DB
@@ -51,6 +57,11 @@ func (block Block) TableName() string {
 func (transaction Transaction) TableName() string {
 	// 绑定MYSQL表名為transaction
 	return "transaction"
+}
+
+func (log Log) TableName() string {
+	// 绑定MYSQL表名為log
+	return "log"
 }
 
 func main() {
@@ -110,7 +121,7 @@ func main() {
 	db.Create(&blockModel)
 	blockId := blockModel.ID
 
-	// Iterate txs
+	// Txs
 	for _, tx := range block.Transactions() {
 		from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
 
@@ -132,7 +143,31 @@ func main() {
 			BlockID: blockId,
 		}
 		db.Create(&transactionModel)
-		break
+		transactionId := transactionModel.ID
+
+		// Get logs from tx receipt
+		receipt, err := client.TransactionReceipt(context.Background(), tx.Hash())
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if len(receipt.Logs) == 0 {
+			continue
+		}
+
+		// Logs
+		for _, log := range receipt.Logs {
+			fmt.Println("log_index:", log.Index) // 1
+			fmt.Println("log_data:", log.Data)   // [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 232 147 174 5 126 221 103 122 0]
+
+			// Insert log
+			logModel := Log{
+				Index:         log.Index,
+				Data:          log.Data,
+				TransactionID: transactionId,
+			}
+			db.Create(&logModel)
+		}
 	}
 }
 
