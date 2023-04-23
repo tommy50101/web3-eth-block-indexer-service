@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strconv"
+
 	"github.com/ethereum/go-ethereum/core/types"
 
 	// "math/big"
@@ -64,9 +66,23 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// fmt.Println(latestHeader.Number)
 
-	// Get block by header number
-	block, err := client.BlockByNumber(context.Background(), latestHeader.Number)
+	// 參數代表從第幾個區塊開始，不給預設最新區塊的前10個開始
+	arg := os.Args
+	var startIndex *big.Int
+	if len(arg) != 1 {
+		i, _ := strconv.ParseInt(os.Args[1], 10, 64)
+		startIndex = big.NewInt(i)
+	} else {
+		sLatestHeader := latestHeader.Number.String()
+		iLatestHeader, _ := strconv.ParseInt(sLatestHeader, 10, 64)
+		iStartIndex := iLatestHeader - 10
+		startIndex = big.NewInt(iStartIndex)
+	}
+
+	// Get latest block by header number
+	block, err := client.BlockByNumber(context.Background(), startIndex)
 	if err != nil {
 		log.Fatal(err)
 	}
