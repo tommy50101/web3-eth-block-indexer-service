@@ -118,7 +118,7 @@ func main() {
 		BlockTime:  block.Time(),
 		ParentHash: parentHash,
 	}
-	db.Create(&blockModel)
+	db.Where(Block{BlockNum: block.Number().Uint64()}).FirstOrCreate(&blockModel)
 	blockId := blockModel.ID
 
 	// Txs
@@ -142,7 +142,7 @@ func main() {
 			Value:   tx.Value().String(),
 			BlockID: blockId,
 		}
-		db.Create(&transactionModel)
+		db.Where(Transaction{TxHash: tx.Hash().Hex()}).FirstOrCreate(&transactionModel)
 		transactionId := transactionModel.ID
 
 		// Get logs from tx receipt
@@ -166,7 +166,7 @@ func main() {
 				Data:          log.Data,
 				TransactionID: transactionId,
 			}
-			db.Create(&logModel)
+			db.Where(Log{Index: log.Index, Data: log.Data}).FirstOrCreate(&logModel)
 		}
 	}
 }
