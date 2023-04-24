@@ -7,21 +7,20 @@
 ## Setup
 
 ```zsh
-$ go get .
+1. $ go get .
+2. 在 .env 檔內加上 Infura 的 eth main net 的 key
 ```
-
-並在 .env 檔內加上 Infura 的 eth main net 的 key
 
 ## Start
 
 ```zsh
-// 1. 不指定開始區塊(預設最新區塊的前第10個開始)
+1. 不指定開始區塊(預設最新區塊的前第10個開始)
 $ go run .
 
-// 2. 指定開始區塊
+2. 指定開始區塊
 $ go run . <block＿number>
 
-// example:
+example:
 $ go run . 17114151
 ```
 
