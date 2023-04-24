@@ -1,4 +1,4 @@
-module example/eth-block-indexer-service
+module web3/eth-block-indexer-service
 
 go 1.20
 
