@@ -16,11 +16,15 @@ import (
 	"gorm.io/gorm"
 )
 
-var db *gorm.DB
+var (
+	client *ethclient.Client
+	err    error
+	db     *gorm.DB
+)
 
 func main() {
 	initDb()
-	client, err := ethclient.Dial("https://mainnet.infura.io/v3/" + os.Getenv("INFURA_ETH_MAIN_KEY"))
+	client, err = ethclient.Dial("https://mainnet.infura.io/v3/" + os.Getenv("INFURA_ETH_MAIN_KEY"))
 	if err != nil {
 		fmt.Println("json-rpc server connection failed")
 		return
@@ -74,54 +78,7 @@ func main() {
 		db.Where(Block{BlockNum: block.Number().Uint64()}).FirstOrCreate(&blockModel)
 		blockId := blockModel.ID
 
-		// Txs
-		for _, tx := range block.Transactions() {
-			from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
-
-			fmt.Println("tx_hash:", tx.Hash().Hex())   // 0x7104e3d31ed4f82278b7b03a40661f289d95ad10385543c4cdf8755a678af8a2
-			fmt.Println("from:", from.Hex())           // 0xB55Ff2eafcE9Efb883d0E6Ad27a286AA875dBED2
-			fmt.Println("to:", tx.To().Hex())          // 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
-			fmt.Println("nonce:", tx.Nonce())          // 79
-			fmt.Println("data:", tx.Data())            // [24 203 175 229 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
-			fmt.Println("value:", tx.Value().String()) // 10000000000000000
-
-			// Insert tx
-			transactionModel := Transaction{
-				TxHash:  tx.Hash().Hex(),
-				From:    from.Hex(),
-				To:      tx.To().Hex(),
-				Nonce:   tx.Nonce(),
-				Data:    tx.Data(),
-				Value:   tx.Value().String(),
-				BlockID: blockId,
-			}
-			db.Where(Transaction{TxHash: tx.Hash().Hex()}).FirstOrCreate(&transactionModel)
-			transactionId := transactionModel.ID
-
-			// Get logs from tx receipt
-			receipt, err := client.TransactionReceipt(context.Background(), tx.Hash())
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			if len(receipt.Logs) == 0 {
-				continue
-			}
-
-			// Logs
-			for _, log := range receipt.Logs {
-				fmt.Println("log_index:", log.Index) // 1
-				fmt.Println("log_data:", log.Data)   // [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 232 147 174 5 126 221 103 122 0]
-
-				// Insert log
-				logModel := Log{
-					Index:         log.Index,
-					Data:          log.Data,
-					TransactionID: transactionId,
-				}
-				db.Where(Log{Index: log.Index, Data: log.Data}).FirstOrCreate(&logModel)
-			}
-		}
+		insertTxs(blockId, block)
 
 		// 找不到新區塊即終止
 		nextIndex := startIndex.Add(startIndex, big.NewInt(1))
@@ -133,8 +90,59 @@ func main() {
 	}
 }
 
+// 連線Db
 func initDb() {
-	// 連線Db
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True&loc=Local", DB_USERNAME, DB_PWD, DB_HOST, DB_PORT, DB_NAME)
 	db, _ = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+}
+
+// Insert txs
+func insertTxs(blockId uint64, block *types.Block) {
+	for _, tx := range block.Transactions() {
+		from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+
+		fmt.Println("tx_hash:", tx.Hash().Hex())   // 0x7104e3d31ed4f82278b7b03a40661f289d95ad10385543c4cdf8755a678af8a2
+		fmt.Println("from:", from.Hex())           // 0xB55Ff2eafcE9Efb883d0E6Ad27a286AA875dBED2
+		fmt.Println("to:", tx.To().Hex())          // 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
+		fmt.Println("nonce:", tx.Nonce())          // 79
+		fmt.Println("data:", tx.Data())            // [24 203 175 229 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+		fmt.Println("value:", tx.Value().String()) // 10000000000000000
+
+		// Insert tx
+		transactionModel := Transaction{
+			TxHash:  tx.Hash().Hex(),
+			From:    from.Hex(),
+			To:      tx.To().Hex(),
+			Nonce:   tx.Nonce(),
+			Data:    tx.Data(),
+			Value:   tx.Value().String(),
+			BlockID: blockId,
+		}
+		db.Where(Transaction{TxHash: tx.Hash().Hex()}).FirstOrCreate(&transactionModel)
+		transactionId := transactionModel.ID
+
+		// Get logs from tx receipt
+		receipt, err := client.TransactionReceipt(context.Background(), tx.Hash())
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		if len(receipt.Logs) == 0 {
+			continue
+		}
+
+		// Logs
+		for _, log := range receipt.Logs {
+			fmt.Println("log_index:", log.Index) // 1
+			fmt.Println("log_data:", log.Data)   // [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 232 147 174 5 126 221 103 122 0]
+
+			// Insert log
+			logModel := Log{
+				Index:         log.Index,
+				Data:          log.Data,
+				TransactionID: transactionId,
+			}
+			db.Where(Log{Index: log.Index, Data: log.Data}).FirstOrCreate(&logModel)
+		}
+	}
 }
