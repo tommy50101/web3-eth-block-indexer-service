@@ -17,9 +17,11 @@ import (
 )
 
 var (
-	client *ethclient.Client
-	err    error
-	db     *gorm.DB
+	client           *ethclient.Client
+	err              error
+	db               *gorm.DB
+	lastestDbBlockId uint64
+	blockId          uint64
 )
 
 func main() {
@@ -54,6 +56,13 @@ func main() {
 		log.Fatal(err)
 	}
 
+	lastDbBlock := Block{}
+	db.Order("id DESC").First(&lastDbBlock)
+	lastestDbBlockId = lastDbBlock.ID
+	blockId = lastestDbBlockId + 1
+
+	blockModels := []Block{}
+	transactionModels := []Transaction{}
 	for {
 		// Get parent_hash by parent_num
 		parentNumber := big.NewInt((block.Number().Int64() - 1))
@@ -70,21 +79,47 @@ func main() {
 
 		// Insert block
 		blockModel := Block{
+			ID:         blockId,
 			BlockNum:   block.Number().Uint64(),
 			BlockHash:  block.Hash().Hex(),
 			BlockTime:  block.Time(),
 			ParentHash: parentHash,
 		}
-		db.Where(Block{BlockNum: block.Number().Uint64()}).FirstOrCreate(&blockModel)
-		blockId := blockModel.ID
+		blockModels = append(blockModels, blockModel)
 
-		insertTxs(blockId, block)
+		// Arrange txs data for insertion
+		for _, tx := range block.Transactions() {
+			fmt.Println("block_num:", block.Number().Uint64()) // 17102552
+			fmt.Println("block_hash:", block.Hash().Hex())     // 0x9e8751ebb5069389b855bba72d94902cc385042661498a415979b7b6ee9ba4b9
+			fmt.Println("block_time:", block.Time())           // 1527211625
+			fmt.Println("parent_hash:", parentHash)            // 17102551
 
-		// 找不到新區塊即終止
+			if tx.To() == nil {
+				continue
+			}
+			from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+			transactionModel := Transaction{
+				TxHash:  tx.Hash().Hex(),
+				From:    from.Hex(),
+				To:      tx.To().Hex(),
+				Nonce:   tx.Nonce(),
+				Data:    tx.Data(),
+				Value:   tx.Value().String(),
+				BlockID: blockId,
+			}
+			transactionModels = append(transactionModels, transactionModel)
+		}
+
+		// Batch insert blocks, txs then exit when reached latest block
 		nextIndex := startIndex.Add(startIndex, big.NewInt(1))
-		fmt.Println("Next block_num:", nextIndex)
-		block, _ = client.BlockByNumber(context.Background(), nextIndex)
-		if block == nil {
+		nextBlock, _ := client.BlockByNumber(context.Background(), nextIndex)
+		if nextBlock != nil {
+			blockId = blockId + 1
+			block = nextBlock
+		} else {
+			db.Create(&blockModels)
+			insertTxs(transactionModels)
+
 			log.Fatal("Has reached the latest block")
 		}
 	}
@@ -97,52 +132,30 @@ func initDb() {
 }
 
 // Insert txs
-func insertTxs(blockId uint64, block *types.Block) {
-	for _, tx := range block.Transactions() {
-		from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+func insertTxs(transactionModels []Transaction) {
+	db.Create(&transactionModels)
 
-		fmt.Println("tx_hash:", tx.Hash().Hex())   // 0x7104e3d31ed4f82278b7b03a40661f289d95ad10385543c4cdf8755a678af8a2
-		fmt.Println("from:", from.Hex())           // 0xB55Ff2eafcE9Efb883d0E6Ad27a286AA875dBED2
-		fmt.Println("to:", tx.To().Hex())          // 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D
-		fmt.Println("nonce:", tx.Nonce())          // 79
-		fmt.Println("data:", tx.Data())            // [24 203 175 229 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
-		fmt.Println("value:", tx.Value().String()) // 10000000000000000
+	// Get logs from tx receipt
+	// receipt, err := client.TransactionReceipt(context.Background(), tx.Hash())
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
-		// Insert tx
-		transactionModel := Transaction{
-			TxHash:  tx.Hash().Hex(),
-			From:    from.Hex(),
-			To:      tx.To().Hex(),
-			Nonce:   tx.Nonce(),
-			Data:    tx.Data(),
-			Value:   tx.Value().String(),
-			BlockID: blockId,
-		}
-		db.Where(Transaction{TxHash: tx.Hash().Hex()}).FirstOrCreate(&transactionModel)
-		transactionId := transactionModel.ID
+	// if len(receipt.Logs) == 0 {
+	// 	continue
+	// }
 
-		// Get logs from tx receipt
-		receipt, err := client.TransactionReceipt(context.Background(), tx.Hash())
-		if err != nil {
-			log.Fatal(err)
-		}
+	// // Logs
+	// for _, log := range receipt.Logs {
+	// 	fmt.Println("log_index:", log.Index) // 1
+	// 	fmt.Println("log_data:", log.Data)   // [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 232 147 174 5 126 221 103 122 0]
+	// 	// Insert log
+	// 	logModel := Log{
+	// 		Index:         log.Index,
+	// 		Data:          log.Data,
+	// 		TransactionID: transactionId,
+	// 	}
+	// 	db.Where(Log{Index: log.Index, Data: log.Data}).FirstOrCreate(&logModel)
+	// }
 
-		if len(receipt.Logs) == 0 {
-			continue
-		}
-
-		// Logs
-		for _, log := range receipt.Logs {
-			fmt.Println("log_index:", log.Index) // 1
-			fmt.Println("log_data:", log.Data)   // [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 232 147 174 5 126 221 103 122 0]
-
-			// Insert log
-			logModel := Log{
-				Index:         log.Index,
-				Data:          log.Data,
-				TransactionID: transactionId,
-			}
-			db.Where(Log{Index: log.Index, Data: log.Data}).FirstOrCreate(&logModel)
-		}
-	}
 }
