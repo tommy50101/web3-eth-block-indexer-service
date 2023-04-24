@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"strconv"
+	"time"
 
 	"context"
 	"fmt"
@@ -14,41 +16,56 @@ import (
 	_ "github.com/joho/godotenv/autoload"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 var (
+	blockOffset      int64
+	startIndex       *big.Int
 	client           *ethclient.Client
 	err              error
 	db               *gorm.DB
-	lastestDbBlockId uint64
-	lastestDbTxId    uint64
+	lastestDbBlockId int
+	lastestDbTxId    int
 )
 
 func main() {
-	initDb()
+	// 輸入參數判斷
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("請輸入一正整數 n ，程式將從最新區塊的前 n 個區塊開始獲取 (不輸入則預設 n = 10):")
+	fmt.Print("-> ")
+	text, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(text) == 1 {
+		// 沒輸入，預設前10個區塊
+		blockOffset = 10
+	} else {
+		// 輸入n，則從最新區塊-n個區塊開始跑
+		content := text[:len(text)-1]
+		blockOffset, err = strconv.ParseInt(content, 10, 64)
+		if err != nil {
+			log.Fatal("錯誤的輸入: ", err)
+		}
+	}
+
+	// Get latest block header and caculate the start block
 	client, err = ethclient.Dial("https://mainnet.infura.io/v3/" + os.Getenv("INFURA_ETH_MAIN_KEY"))
 	if err != nil {
 		fmt.Println("json-rpc server connection failed")
 		return
 	}
-
-	// 參數代表從第幾個區塊開始，不給預設最新區塊的前10個開始
-	arg := os.Args
-	var startIndex *big.Int
-	if len(arg) != 1 {
-		i, _ := strconv.ParseInt(os.Args[1], 10, 64)
-		startIndex = big.NewInt(i)
-	} else {
-		// Get latest block header
-		latestHeader, err := client.HeaderByNumber(context.Background(), nil)
-		if err != nil {
-			log.Fatal(err)
-		}
-		sLatestHeader := latestHeader.Number.String()
-		iLatestHeader, _ := strconv.ParseInt(sLatestHeader, 10, 64)
-		iStartIndex := iLatestHeader - 10
-		startIndex = big.NewInt(iStartIndex)
+	latestHeader, err := client.HeaderByNumber(context.Background(), nil)
+	fmt.Println("鏈上最新區塊:", latestHeader.Number.String())
+	if err != nil {
+		log.Fatal(err)
 	}
+	sLatestHeader := latestHeader.Number.String()
+	iLatestHeader, _ := strconv.ParseInt(sLatestHeader, 10, 64)
+	iStartIndex := iLatestHeader - blockOffset
+	startIndex = big.NewInt(iStartIndex)
+	fmt.Println("程式起始區塊:", startIndex)
 
 	// Get block by header number
 	block, err := client.BlockByNumber(context.Background(), startIndex)
@@ -56,19 +73,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	lastDbBlock := Block{}
-	db.Last(&lastDbBlock)
-	lastestDbBlockId = lastDbBlock.ID
-	blockId := lastestDbBlockId + 1
-
-	lastDbTx := Transaction{}
-	db.Last(&lastDbTx)
-	lastestDbTxId = lastDbTx.ID
-	txId := lastestDbTxId + 1
-
-	blockModels := []Block{}
-	transactionModels := []Transaction{}
-	logModels := []Log{}
+	initDb()
 
 	for {
 		// Get parent_hash by parent_num
@@ -81,92 +86,94 @@ func main() {
 
 		// Arrange blocks data for insertion
 		blockModel := Block{
-			ID:         blockId,
 			BlockNum:   block.Number().Uint64(),
 			BlockHash:  block.Hash().Hex(),
 			BlockTime:  block.Time(),
 			ParentHash: parentHash,
 		}
-		blockModels = append(blockModels, blockModel)
+		db.Create(&blockModel)
 
-		fmt.Println("block_num:", block.Number().Uint64()) // 17102552
-		fmt.Println("block_hash:", block.Hash().Hex())     // 0x9e8751ebb5069389b855bba72d94902cc385042661498a415979b7b6ee9ba4b9
-		fmt.Println("block_time:", block.Time())           // 1527211625
-		fmt.Println("parent_hash:", parentHash)            // 17102551
+		fmt.Println("新稱區塊中，block_num:", block.Number().Uint64())
 
+		// 多線程執行新增交易紀錄
 		for _, tx := range block.Transactions() {
-			var to string
-			if tx.To() == nil {
-				to = ""
-			} else {
-				to = tx.To().Hex()
-			}
-
-			// Arrange txs data for insertion
-			from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
-			transactionModel := Transaction{
-				ID:      txId,
-				TxHash:  tx.Hash().Hex(),
-				From:    from.Hex(),
-				To:      to,
-				Nonce:   tx.Nonce(),
-				Data:    tx.Data(),
-				Value:   tx.Value().String(),
-				BlockID: blockId,
-			}
-			transactionModels = append(transactionModels, transactionModel)
-
-			fmt.Println("tx_hash:", tx.Hash().Hex())   // 0x9c775841600aca0e9b4d8f1c87e3ae4fd52618d53bcc734558544c1165a6b416
-			fmt.Println("from:", from.Hex())           // 0xae2Fc483527B8EF99EB5D9B44875F005ba1FaE13
-			fmt.Println("to:", tx.To().Hex())          // 0x6b75d8AF000000e20B7a7DDf000Ba900b4009A80
-			fmt.Println("nonce:", tx.Nonce())          // 248674
-			fmt.Println("data:", tx.Data())            //
-			fmt.Println("value:", tx.Value().String()) // [169 5 156 187 0 0 0 0 0 0 0 0 0 0 0 0]
-
-			// Arrange logs data for insertion
-			receipt, err := client.TransactionReceipt(context.Background(), tx.Hash())
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			if len(receipt.Logs) == 0 {
-				continue
-			}
-
-			// Logs
-			for _, log := range receipt.Logs {
-				fmt.Println("log_index:", log.Index) // 1
-				fmt.Println("log_data:", log.Data)   // [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 232 147 174 5 126 221 103 122 0]
-				// Insert log
-				logModel := Log{
-					Index:         log.Index,
-					Data:          log.Data,
-					TransactionID: transactionModel.ID,
-				}
-				logModels = append(logModels, logModel)
-			}
-			txId = txId + 1
+			// Insert txs and logs
+			go insertTxsAndLogs(tx, blockModel.ID)
 		}
-		blockId = blockId + 1
+		time.Sleep(3 * time.Second)
 
-		// Batch insert blocks, txs and logs, then exit when reached latest block
+		// 執行 or 等待，下一個區塊
 		nextIndex := startIndex.Add(startIndex, big.NewInt(1))
-		nextBlock, _ := client.BlockByNumber(context.Background(), nextIndex)
-		if nextBlock != nil {
-			block = nextBlock
-		} else {
-			// Start to batch insert all data
-			db.Create(&blockModels)
-			db.Create(&transactionModels)
-			db.Create(&logModels)
-
-			log.Fatal("Has reached the latest block")
+		for {
+			nextBlock, _ := client.BlockByNumber(context.Background(), nextIndex)
+			if nextBlock != nil {
+				// Next block round
+				block = nextBlock
+				break
+			} else {
+				// 等待下一區塊
+				time.Sleep(6 * time.Second)
+				fmt.Printf("等待下一個最新區塊: %d 產生中\n", block.Number().Uint64()+1)
+				time.Sleep(6 * time.Second)
+			}
 		}
 	}
 }
 
-// 連線Db
+// 連線Db & 初始化gorm
 func initDb() {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True&loc=Local", DB_USERNAME, DB_PWD, DB_HOST, DB_PORT, DB_NAME)
-	db, _ = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	db, _ = gorm.Open(mysql.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+}
+
+// 插入Txs和Logs
+func insertTxsAndLogs(tx *types.Transaction, blockId int) {
+	// Prevent invalid memory address or nil pointer dereference
+	var to string
+	if tx.To() == nil {
+		to = ""
+	} else {
+		to = tx.To().Hex()
+	}
+
+	// Insert txs
+	from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+	transactionModel := Transaction{
+		TxHash:  tx.Hash().Hex(),
+		From:    from.Hex(),
+		To:      to,
+		Nonce:   tx.Nonce(),
+		Data:    tx.Data(),
+		Value:   tx.Value().String(),
+		BlockID: blockId,
+	}
+	db.Create(&transactionModel)
+
+	fmt.Println("新增Transaction中，tx_hash:", tx.Hash().Hex())
+
+	// Get logs from TransactionReceipt
+	receipt, err := client.TransactionReceipt(context.Background(), tx.Hash())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if len(receipt.Logs) == 0 {
+		return
+	}
+
+	// Batch insert logs
+	logModels := []Log{}
+	for _, log := range receipt.Logs {
+		logModel := Log{
+			Index:         log.Index,
+			Data:          log.Data,
+			TransactionID: transactionModel.ID,
+		}
+		logModels = append(logModels, logModel)
+
+		fmt.Println("新增Log中，log_index:", log.Index)
+	}
+	db.Create(&logModels)
 }

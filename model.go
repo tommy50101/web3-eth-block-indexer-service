@@ -4,7 +4,7 @@ import "gorm.io/gorm"
 
 type Block struct {
 	// gorm.Model
-	ID         uint64
+	ID         int
 	BlockNum   uint64
 	BlockHash  string
 	BlockTime  uint64
@@ -13,21 +13,21 @@ type Block struct {
 
 type Transaction struct {
 	gorm.Model
-	ID      uint64
+	ID      int
 	TxHash  string
 	From    string
 	To      string
 	Nonce   uint64
 	Data    []byte
 	Value   string
-	BlockID uint64
+	BlockID int
 }
 
 type Log struct {
 	gorm.Model
 	Index         uint
 	Data          []byte
-	TransactionID uint64
+	TransactionID int
 }
 
 func (block Block) TableName() string {
