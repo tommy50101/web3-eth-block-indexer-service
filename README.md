@@ -10,17 +10,19 @@
 $ go get .
 ```
 
+並在 .env 檔內加上 Infura 的 eth main net 的 key
+
 ## Start
 
 ```zsh
-// 1. 指定開始區塊
+// 1. 不指定開始區塊(預設最新區塊的前第10個開始)
+$ go run .
+
+// 2. 指定開始區塊
 $ go run . <block＿number>
 
 // example:
 $ go run . 17114151
-
-// 2. 不指定開始區塊(預設最新區塊的前第10個開始)
-$ go run .
 ```
 
 ## Usage
