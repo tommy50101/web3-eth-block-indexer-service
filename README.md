@@ -7,23 +7,23 @@
 ## Setup
 
 ```zsh
-1. $ go get .
-2. 在 .env 檔內加上 Infura 的 eth main net 的 key
+$ go get .
 ```
 
 ## Start
 
 ```zsh
-1. 不指定開始區塊(預設最新區塊的前第10個開始)
-$ go run .
+1. $ cd web3-eth-block-indexer-service/
 
-2. 指定開始區塊
-$ go run . <block＿number>
+2. $ go run .
 
-example:
-$ go run . 17114151
+3. 輸入第一個參數，值為1或2，指定於哪條鏈上作業。 1:BSC testnet 2:Ethereum testnet(Goerli)
+
+4. 輸入第二個參數，值為任意正整數，決定程式從最新區塊的前面第 n 個區塊開始獲取資料。 若沒輸入則預設 n = 10
 ```
 
 ## Usage
 
-啟動後即會開始從指定起始block_number位置，依序掃到最新區塊，掃描鏈上block、transactions、logs的資訊，並存入資料庫
+啟動後即會依照你指定的鏈，從最新前n個區塊開始，掃描鏈上block、transactions、logs的資訊，並存入資料庫，一直掃到最新區塊，並繼續持續獲取新產出的區塊。
+
+不同鏈的資料會記錄到不同的庫，但都存在於同一個已架好的AWS RDS實例裡，連線資訊都紀錄於config.go，也可透過任何GUI直接連線過去確認數據

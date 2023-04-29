@@ -105,24 +105,15 @@ func main() {
 	initDb()
 
 	for {
-		// Get parent_hash by parent_num
-		parentNumber := big.NewInt((block.Number().Int64() - 1))
-		parentBlock, err := client.BlockByNumber(context.Background(), parentNumber)
-		if err != nil {
-			log.Fatal(err)
-		}
-		parentHash := parentBlock.Hash().Hex()
-
 		// Arrange blocks data for insertion
+		fmt.Println("新增區塊中，block_num:", block.Number().Uint64())
 		blockModel := Block{
 			BlockNum:   block.Number().Uint64(),
 			BlockHash:  block.Hash().Hex(),
 			BlockTime:  block.Time(),
-			ParentHash: parentHash,
+			ParentHash: block.ParentHash().Hex(),
 		}
 		db.Create(&blockModel)
-
-		fmt.Println("新稱區塊中，block_num:", block.Number().Uint64())
 
 		// 多線程執行新增交易紀錄
 		for _, tx := range block.Transactions() {
@@ -168,6 +159,7 @@ func insertTxsAndLogs(tx *types.Transaction, blockId int) {
 	}
 
 	// Insert txs
+	fmt.Println("新增Transaction中，tx_hash:", tx.Hash().Hex())
 	from, _ := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
 	transactionModel := Transaction{
 		TxHash:  tx.Hash().Hex(),
@@ -179,8 +171,6 @@ func insertTxsAndLogs(tx *types.Transaction, blockId int) {
 		BlockID: blockId,
 	}
 	db.Create(&transactionModel)
-
-	fmt.Println("新增Transaction中，tx_hash:", tx.Hash().Hex())
 
 	// Get logs from TransactionReceipt
 	receipt, err := client.TransactionReceipt(context.Background(), tx.Hash())
@@ -195,14 +185,13 @@ func insertTxsAndLogs(tx *types.Transaction, blockId int) {
 	// Batch insert logs
 	logModels := []Log{}
 	for _, log := range receipt.Logs {
+		fmt.Println("新增Log中，log_index:", log.Index)
 		logModel := Log{
 			Index:         log.Index,
 			Data:          log.Data,
 			TransactionID: transactionModel.ID,
 		}
 		logModels = append(logModels, logModel)
-
-		fmt.Println("新增Log中，log_index:", log.Index)
 	}
 	db.Create(&logModels)
 }
