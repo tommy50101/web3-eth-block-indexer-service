@@ -20,30 +20,59 @@ import (
 )
 
 var (
-	blockOffset      int64
-	startIndex       *big.Int
-	client           *ethclient.Client
-	err              error
-	db               *gorm.DB
-	lastestDbBlockId int
-	lastestDbTxId    int
+	sRpc                string
+	blockOffset         int64
+	startIndex          *big.Int
+	client              *ethclient.Client
+	err                 error
+	dbName              string
+	db                  *gorm.DB
+	lastestDbBlockId    int
+	lastestDbTxId       int
+	waitTxGoroutineTime float64
+	waitNextBlockTime   float64
 )
 
 func main() {
 	// 輸入參數判斷
+	// 判斷哪個鏈
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("請輸入一正整數 n ，程式將從最新區塊的前 n 個區塊開始獲取 (不輸入則預設 n = 10):")
+	fmt.Println("請輸入要在哪個鏈上執行: 1.BSC testnet  2.Ethereum testnet(goerli) ")
 	fmt.Print("-> ")
 	text, err := reader.ReadString('\n')
 	if err != nil {
 		log.Fatal(err)
 	}
-	if len(text) == 1 {
+	if text[:len(text)-1] != "1" && text[:len(text)-1] != "2" {
+		log.Fatal("不合法的輸入")
+	}
+
+	// 根據選擇不同的鏈，有不同的等待參數、數據庫、RPC節點
+	if text[:len(text)-1] == "1" {
+		sRpc = "https://data-seed-prebsc-2-s3.binance.org:8545/"
+		dbName = "bsc_testnet"
+		waitTxGoroutineTime = 0.5
+		waitNextBlockTime = 1.0
+	} else {
+		sRpc = "https://goerli.infura.io/v3/84a99a188f8e4aaab60c45f9955c5d6b"
+		dbName = "eth_testnet_goerli"
+		waitTxGoroutineTime = 3.0
+		waitNextBlockTime = 12.0
+	}
+
+	// 判斷從最新的前n個區塊開始
+	fmt.Println("請輸入一正整數 n ，程式將從最新區塊的前 n 個區塊開始獲取 (不輸入則預設 n = 10):")
+	fmt.Print("-> ")
+	text2, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(text2) == 1 {
 		// 沒輸入，預設前10個區塊
 		blockOffset = 10
 	} else {
 		// 輸入n，則從最新區塊-n個區塊開始跑
-		content := text[:len(text)-1]
+		content := text2[:len(text2)-1]
 		blockOffset, err = strconv.ParseInt(content, 10, 64)
 		if err != nil {
 			log.Fatal("錯誤的輸入: ", err)
@@ -51,7 +80,7 @@ func main() {
 	}
 
 	// Get latest block header and caculate the start block
-	client, err = ethclient.Dial("https://mainnet.infura.io/v3/" + os.Getenv("INFURA_ETH_MAIN_KEY"))
+	client, err = ethclient.Dial(sRpc)
 	if err != nil {
 		fmt.Println("json-rpc server connection failed")
 		return
@@ -100,7 +129,7 @@ func main() {
 			// Insert txs and logs
 			go insertTxsAndLogs(tx, blockModel.ID)
 		}
-		time.Sleep(3 * time.Second)
+		time.Sleep(time.Duration(waitTxGoroutineTime) * time.Second)
 
 		// 執行 or 等待，下一個區塊
 		nextIndex := startIndex.Add(startIndex, big.NewInt(1))
@@ -112,9 +141,9 @@ func main() {
 				break
 			} else {
 				// 等待下一區塊
-				time.Sleep(6 * time.Second)
-				fmt.Printf("等待下一個最新區塊: %d 產生中\n", block.Number().Uint64()+1)
-				time.Sleep(6 * time.Second)
+				time.Sleep(time.Duration(waitNextBlockTime/2) * time.Second)
+				fmt.Printf("等待下一個最新區塊: %d 產生中...\n", block.Number().Uint64()+1)
+				time.Sleep(time.Duration(waitNextBlockTime/2) * time.Second)
 			}
 		}
 	}
@@ -122,7 +151,7 @@ func main() {
 
 // 連線Db & 初始化gorm
 func initDb() {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True&loc=Local", DB_USERNAME, DB_PWD, DB_HOST, DB_PORT, DB_NAME)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True&loc=Local", DB_USERNAME, DB_PWD, DB_HOST, DB_PORT, dbName)
 	db, _ = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
