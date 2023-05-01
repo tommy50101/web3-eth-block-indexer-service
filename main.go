@@ -33,6 +33,11 @@ var (
 	waitTxGoroutineTime  float64
 	waitLogGoroutineTime float64
 	waitNextBlockTime    float64
+	preblockHash         string
+	sha3Uncles           string
+	unstableBlockHashes  []string
+	stableCountDown      = 0
+	isCurrentBlockStable = true
 )
 
 func main() {
@@ -45,7 +50,7 @@ func main() {
 		fmt.Printf("新增區塊 %d 中...\n", block.Number().Uint64())
 
 		// 新增區塊
-		blockId := insertBlock(block)
+		blockId := insertBlock()
 
 		// 多線程執行新增交易紀錄
 		for _, tx := range block.Transactions() {
@@ -55,8 +60,11 @@ func main() {
 
 		fmt.Printf("新增區塊 %d 完畢\n\n", block.Number().Uint64())
 
-		// 執行 or 等待，下一個區塊
+		// 取得並執行 or 等待，下一個區塊
 		processOrWaitNextBlock()
+
+		// 判斷or更改區塊之穩定狀態
+		checkBlockStable()
 	}
 }
 
@@ -152,15 +160,68 @@ func initStartBlock() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	sha3Uncles = block.UncleHash().String()
+}
+
+// 判斷or更改區塊之穩定狀態
+func checkBlockStable() {
+	// 發現前一區塊分叉，將前一區塊與自己這區塊，標記為不穩定，並開始計算後續區塊數量
+	if block.UncleHash().String() != sha3Uncles {
+		stableCountDown = 6
+		unstableBlockHashes = append(unstableBlockHashes, preblockHash)
+		stableCountDown -= 1
+		db.Model(&Block{}).Where("block_hash = ?", preblockHash).Update("isStable", false)
+
+		unstableBlockHashes = append(unstableBlockHashes, block.Hash().Hex())
+		isCurrentBlockStable = false
+		stableCountDown -= 1
+		return
+	}
+
+	if stableCountDown != 0 {
+		// 目前分支處於不穩定狀態
+		fmt.Printf("此區塊 %d 不穩定\n", block.Number().Uint64())
+
+		if preblockHash == block.Hash().Hex() {
+			isCurrentBlockStable = false
+			unstableBlockHashes = append(unstableBlockHashes, preblockHash)
+			stableCountDown -= 1
+		} else {
+			// 若某新區塊的 preHash 不等於前一個區塊，代表目前分支長度被超越，將重新抓取開始分叉後到現在的每個區塊
+			fmt.Println("此分支並非最長分支，將重新獲取最長分支")
+
+			stableCountDown = 6
+			unstableBlockHashes = []string{}
+			db.Model(&Block{}).Delete("id IN ?", unstableBlockHashes)
+
+			currentNumber := block.Number().Uint64()
+			blockIdsLen := uint64(len(unstableBlockHashes))
+			reFetchStart := int64(currentNumber - blockIdsLen)
+			reFetchIndex := big.NewInt(reFetchStart)
+			block, _ := client.BlockByNumber(context.Background(), reFetchIndex)
+
+			fmt.Printf("重新從 %d 開始新增區塊...\n", block.Number().Uint64())
+		}
+
+	} else {
+		// 目前分支已累積超過6個區塊，處於穩定狀態
+		isCurrentBlockStable = true
+		if len(unstableBlockHashes) > 0 {
+			fmt.Printf("更新前面區塊的穩定狀態")
+			db.Model(&Block{}).Where("id IN ?", unstableBlockHashes).Update("isStable", true)
+		}
+	}
 }
 
 // 新增Block
-func insertBlock(block *types.Block) int {
+func insertBlock() int {
 	blockModel := Block{
 		BlockNum:   block.Number().Uint64(),
 		BlockHash:  block.Hash().Hex(),
 		BlockTime:  block.Time(),
 		ParentHash: block.ParentHash().Hex(),
+		IsStable:   isCurrentBlockStable,
 	}
 	db.Create(&blockModel)
 	return blockModel.ID
@@ -210,6 +271,7 @@ func insertLog(log *types.Log, transactionId int) {
 }
 
 func processOrWaitNextBlock() {
+	preblockHash = block.Hash().Hex()
 	nextIndex := startIndex.Add(startIndex, big.NewInt(1))
 	for {
 		nextBlock, _ := client.BlockByNumber(context.Background(), nextIndex)

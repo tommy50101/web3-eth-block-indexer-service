@@ -9,6 +9,7 @@ type Block struct {
 	BlockHash  string
 	BlockTime  uint64
 	ParentHash string
+	IsStable   bool
 }
 
 type Transaction struct {
