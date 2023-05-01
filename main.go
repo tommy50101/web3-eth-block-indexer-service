@@ -41,9 +41,16 @@ var (
 )
 
 func main() {
+	// 輸入參數判斷
 	checkArgs()
+
+	// 連線Db & 初始化gorm
 	initDb()
+
+	// 初始化Rpc node
 	initRpc()
+
+	// 依照輸入的位移量參數，獲取要爬取的起點區塊
 	initStartBlock()
 
 	for {
@@ -68,8 +75,8 @@ func main() {
 	}
 }
 
+// 輸入參數判斷
 func checkArgs() {
-	// 輸入參數判斷
 	// 判斷哪個鏈
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Println("請輸入要在哪個鏈上執行: 1.BSC testnet  2.Ethereum testnet(goerli)  3.Ethereum mainnet")
@@ -81,7 +88,6 @@ func checkArgs() {
 	if text[:len(text)-1] != "1" && text[:len(text)-1] != "2" && text[:len(text)-1] != "3" {
 		log.Fatal("不合法的輸入")
 	}
-
 	// 根據選擇不同的鏈，有不同的等待參數、數據庫、RPC節點
 	if text[:len(text)-1] == "1" {
 		sRpc = "https://data-seed-prebsc-2-s3.binance.org:8545/"
@@ -131,6 +137,7 @@ func initDb() {
 	})
 }
 
+// 初始化Rpc node
 func initRpc() {
 	// Get latest block header and caculate the start block
 	client, err = ethclient.Dial(sRpc)
@@ -140,6 +147,7 @@ func initRpc() {
 	}
 }
 
+// 依照輸入的位移量參數，獲取要爬取的起點區塊
 func initStartBlock() {
 	latestHeader, err := client.HeaderByNumber(context.Background(), nil)
 	if err != nil {
@@ -164,7 +172,7 @@ func initStartBlock() {
 	sha3Uncles = block.UncleHash().String()
 }
 
-// 判斷or更改區塊之穩定狀態
+// 判斷 or 更改區塊之穩定狀態
 func checkBlockStable() {
 	// 發現前一區塊分叉，將前一區塊與自己這區塊，標記為不穩定，並開始計算後續區塊數量
 	if block.UncleHash().String() != sha3Uncles {
@@ -270,6 +278,7 @@ func insertLog(log *types.Log, transactionId int) {
 	db.Create(&logModel)
 }
 
+// 取得並執行 or 等待，下一個區塊
 func processOrWaitNextBlock() {
 	preblockHash = block.Hash().Hex()
 	nextIndex := startIndex.Add(startIndex, big.NewInt(1))
