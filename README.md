@@ -6,17 +6,17 @@
 
 ## Enviroment
 
-GO version: 1.20.3
+```GO version```: 1.20.3
 
-DB instance: AWS RDS (db.t3.medium)
+```DB instance```: AWS RDS (db.t3.medium)
 
-DB engine: Mysql
+```DB engine```: Mysql
 
 ## Requirement
 
-Hardwares of db: CPU >= 2, RAM >= 4G
+```Hardwares of db```: CPU >= 2, RAM >= 4G
 
-Params of mysql: max_connections >= 600
+```Params of mysql```: max_connections >= 600
 
 ## Setup
 
