@@ -4,6 +4,20 @@
 
 透過 go-ethereum 將區塊內的資料掃進 db
 
+## Enviroment
+
+GO version: 1.20.3
+
+DB instance: AWS RDS (db.t3.medium)
+
+DB engine: Mysql
+
+## Requirement
+
+Hardwares of db: CPU >= 2, RAM >= 4G
+
+Params of mysql: max_connections >= 600
+
 ## Setup
 
 ```zsh
